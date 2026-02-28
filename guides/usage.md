@@ -365,10 +365,14 @@ alias PklElixir.{Server, ModuleSource}
 {:ok, r1} = Server.evaluate(server, eval_id, ModuleSource.text(~S'x = 1'))
 {:ok, r2} = Server.evaluate(server, eval_id, ModuleSource.file("config.pkl"))
 
-# Clean up
+# Clean up when done with this evaluator
 Server.close_evaluator(server, eval_id)
+
+# Stop the server when completely done
 GenServer.stop(server)
 ```
+
+> **Note:** `close_evaluator/2` frees resources on both sides (Elixir state and the pkl subprocess) and is good practice for long-lived servers where you create and discard evaluators over time. However, it's not strictly required — when a server stops, it automatically closes all remaining evaluators during shutdown. If you're about to call `GenServer.stop/1` anyway, skipping the explicit close is fine.
 
 This is especially useful in:
 - Web request handlers that evaluate config per-request
@@ -401,10 +405,12 @@ Then use the registered name anywhere in your app:
 {:ok, config} = PklElixir.Server.evaluate(MyApp.Pkl, eval_id,
   PklElixir.ModuleSource.file("config.pkl")
 )
+
+# Good practice for long-lived servers — frees evaluator state
 PklElixir.Server.close_evaluator(MyApp.Pkl, eval_id)
 ```
 
-The server automatically restarts if it crashes, and gracefully closes all evaluators on shutdown.
+The server automatically restarts if it crashes, and gracefully closes all remaining evaluators on shutdown.
 
 ## Error Handling
 
