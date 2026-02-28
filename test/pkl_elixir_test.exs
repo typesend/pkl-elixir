@@ -70,6 +70,56 @@ defmodule PklElixirTest do
 
       assert {:ok, 0..10//2} = BinaryDecoder.decode(bytes)
     end
+
+    test "decodes set" do
+      set = [0x06, ["a", "b", "c"]]
+      bytes = Msgpax.pack!(set) |> IO.iodata_to_binary()
+
+      assert {:ok, result} = BinaryDecoder.decode(bytes)
+      assert result == MapSet.new(["a", "b", "c"])
+    end
+
+    test "decodes map type" do
+      map = [0x02, %{"key" => "value"}]
+      bytes = Msgpax.pack!(map) |> IO.iodata_to_binary()
+
+      assert {:ok, %{"key" => "value"}} = BinaryDecoder.decode(bytes)
+    end
+
+    test "decodes data size" do
+      ds = [0x08, 1024.0, "mb"]
+      bytes = Msgpax.pack!(ds) |> IO.iodata_to_binary()
+
+      assert {:ok, %{value: 1024.0, unit: "mb"}} = BinaryDecoder.decode(bytes)
+    end
+
+    test "decodes class metadata" do
+      cls = [0x0C, "MyClass", "repl:text"]
+      bytes = Msgpax.pack!(cls) |> IO.iodata_to_binary()
+
+      assert {:ok, %{__type__: :class, name: "MyClass", module_uri: "repl:text"}} =
+               BinaryDecoder.decode(bytes)
+    end
+
+    test "decodes bytes" do
+      bin_data = [0x0F, Msgpax.Bin.new(<<1, 2, 3>>)]
+      bytes = Msgpax.pack!(bin_data) |> IO.iodata_to_binary()
+
+      assert {:ok, <<1, 2, 3>>} = BinaryDecoder.decode(bytes)
+    end
+
+    test "decodes object with entries" do
+      object = [
+        0x01,
+        "Dynamic",
+        "repl:text",
+        [[0x11, "k1", "v1"], [0x11, "k2", "v2"]]
+      ]
+
+      bytes = Msgpax.pack!(object) |> IO.iodata_to_binary()
+
+      assert {:ok, %{"k1" => "v1", "k2" => "v2"}} = BinaryDecoder.decode(bytes)
+    end
   end
 
   # ── Module Source ────────────────────────────────────────────────────
@@ -318,6 +368,125 @@ defmodule PklElixirTest do
       after
         GenServer.stop(server)
       end
+    end
+
+    @tag :integration
+    test "evaluate_text with mapping" do
+      text = """
+      lookup: Mapping<String, Int> = new {
+        ["alice"] = 1
+        ["bob"] = 2
+      }
+      """
+
+      assert {:ok, result} = PklElixir.evaluate_text(text)
+      assert result["lookup"] == %{"alice" => 1, "bob" => 2}
+    end
+
+    @tag :integration
+    test "evaluate_text with set" do
+      text = """
+      tags: Set<String> = Set("a", "b", "c")
+      """
+
+      assert {:ok, result} = PklElixir.evaluate_text(text)
+      assert result["tags"] == MapSet.new(["a", "b", "c"])
+    end
+
+    @tag :integration
+    test "evaluate_text with duration" do
+      text = """
+      timeout = 5.min
+      """
+
+      assert {:ok, result} = PklElixir.evaluate_text(text)
+      assert result["timeout"] == %{value: 5.0, unit: "min"}
+    end
+
+    @tag :integration
+    test "evaluate_text with data size" do
+      text = """
+      maxMem = 512.mb
+      """
+
+      assert {:ok, result} = PklElixir.evaluate_text(text)
+      assert result["maxMem"] == %{value: 512.0, unit: "mb"}
+    end
+
+    @tag :integration
+    test "evaluate_text with pair" do
+      text = """
+      pair = Pair("key", 42)
+      """
+
+      assert {:ok, result} = PklElixir.evaluate_text(text)
+      assert result["pair"] == {"key", 42}
+    end
+
+    @tag :integration
+    test "evaluate_text with int seq" do
+      text = """
+      seq = IntSeq(1, 10)
+      """
+
+      assert {:ok, result} = PklElixir.evaluate_text(text)
+      assert result["seq"] == 1..10
+    end
+
+    @tag :integration
+    test "evaluate_text with regex" do
+      text = ~S"""
+      pattern = Regex("\\d+")
+      """
+
+      assert {:ok, result} = PklElixir.evaluate_text(text)
+      assert %Regex{} = result["pattern"]
+    end
+
+    @tag :integration
+    test "evaluate_text with listing" do
+      text = """
+      items: Listing<String> = new {
+        "first"
+        "second"
+        "third"
+      }
+      """
+
+      assert {:ok, result} = PklElixir.evaluate_text(text)
+      assert result["items"] == ["first", "second", "third"]
+    end
+
+    @tag :integration
+    test "evaluate_text with map" do
+      text = """
+      lookup: Map<String, Int> = Map("x", 1, "y", 2)
+      """
+
+      assert {:ok, result} = PklElixir.evaluate_text(text)
+      assert result["lookup"] == %{"x" => 1, "y" => 2}
+    end
+
+    @tag :integration
+    test "evaluate_text with boolean and null" do
+      text = """
+      flag = true
+      empty: String? = null
+      """
+
+      assert {:ok, result} = PklElixir.evaluate_text(text)
+      assert result["flag"] == true
+      assert result["empty"] == nil
+    end
+
+    @tag :integration
+    test "evaluate_text with float" do
+      text = """
+      pi = 3.14159
+      """
+
+      assert {:ok, result} = PklElixir.evaluate_text(text)
+      assert_in_delta result["pi"], 3.14159, 0.00001
     end
   end
 end

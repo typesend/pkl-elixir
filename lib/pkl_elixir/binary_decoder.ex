@@ -13,8 +13,10 @@ defmodule PklElixir.BinaryDecoder do
   @pair 0x09
   @int_seq 0x0A
   @regex 0x0B
-  # 0x0C class, 0x0D typealias, 0x0E function — not meaningful to decode
-  # 0x0F bytes
+  @class 0x0C
+  @typealias 0x0D
+  # 0x0E = function — not meaningful to decode (pkl closure reference)
+  @bytes 0x0F
 
   # Object member codes
   @property 0x10
@@ -100,6 +102,21 @@ defmodule PklElixir.BinaryDecoder do
   # Regex → compiled Regex
   defp decode_value([@regex, pattern]) do
     Regex.compile!(pattern)
+  end
+
+  # Class → metadata struct
+  defp decode_value([@class, name, module_uri]) do
+    %{__type__: :class, name: name, module_uri: module_uri}
+  end
+
+  # TypeAlias → metadata struct
+  defp decode_value([@typealias, name, module_uri]) do
+    %{__type__: :typealias, name: name, module_uri: module_uri}
+  end
+
+  # Bytes → raw binary
+  defp decode_value([@bytes, data]) when is_binary(data) do
+    data
   end
 
   # Fallback: return raw term
