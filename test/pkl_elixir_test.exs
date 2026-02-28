@@ -488,5 +488,29 @@ defmodule PklElixirTest do
       assert {:ok, result} = PklElixir.evaluate_text(text)
       assert_in_delta result["pi"], 3.14159, 0.00001
     end
+
+    @tag :integration
+    test "pkl_version returns version string" do
+      assert {:ok, version} = PklElixir.Server.pkl_version()
+      assert version =~ "Pkl"
+    end
+
+    @tag :integration
+    test "server works under supervision" do
+      children = [
+        {PklElixir.Server, name: :test_pkl_server}
+      ]
+
+      {:ok, sup} = Supervisor.start_link(children, strategy: :one_for_one)
+
+      try do
+        {:ok, eval_id} = PklElixir.Server.create_evaluator(:test_pkl_server)
+        source = PklElixir.ModuleSource.text(~S'supervised = true')
+        assert {:ok, %{"supervised" => true}} = PklElixir.Server.evaluate(:test_pkl_server, eval_id, source)
+        PklElixir.Server.close_evaluator(:test_pkl_server, eval_id)
+      after
+        Supervisor.stop(sup)
+      end
+    end
   end
 end

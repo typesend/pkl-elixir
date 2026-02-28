@@ -6,6 +6,19 @@ defmodule PklElixir.Server do
   request/response correlation for CreateEvaluator and Evaluate calls,
   and dispatches server-initiated requests (ReadModule, ReadResource,
   ListModules, ListResources) to registered reader callbacks.
+
+  ## Usage
+
+  Can be started standalone or under a supervisor:
+
+      # Standalone
+      {:ok, server} = PklElixir.Server.start_link()
+
+      # Under a supervisor
+      children = [
+        {PklElixir.Server, name: MyApp.PklServer}
+      ]
+      Supervisor.start_link(children, strategy: :one_for_one)
   """
 
   use GenServer
@@ -22,8 +35,28 @@ defmodule PklElixir.Server do
 
   # ── Client API ──────────────────────────────────────────────────────
 
+  @doc """
+  Start the pkl server process.
+
+  ## Options
+
+    * `:name` — register the GenServer under a name
+
+  The pkl subprocess is started lazily on first `create_evaluator/2` call.
+  """
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, Keyword.take(opts, [:name]))
+  end
+
+  @doc "Returns a child spec for use in supervision trees."
+  def child_spec(opts) do
+    %{
+      id: Keyword.get(opts, :name, __MODULE__),
+      start: {__MODULE__, :start_link, [opts]},
+      type: :worker,
+      restart: :permanent
+    }
   end
 
   @doc """
@@ -43,26 +76,58 @@ defmodule PklElixir.Server do
     * `:root_dir` — root directory path
     * `:timeout` — timeout in milliseconds (default: 60_000)
 
-  Returns `{:ok, evaluator_id}`.
+  Returns `{:ok, evaluator_id}` or `{:error, reason}`.
   """
+  @spec create_evaluator(GenServer.server(), keyword()) ::
+          {:ok, integer()} | {:error, Exception.t()}
   def create_evaluator(server, opts \\ []) do
     GenServer.call(server, {:create_evaluator, opts}, timeout(opts))
   end
 
-  @doc "Evaluate a module source. Returns `{:ok, result}` or `{:error, reason}`."
+  @doc """
+  Evaluate a module source.
+
+  ## Options
+
+    * `:expr` — evaluate a specific expression instead of the whole module
+    * `:timeout` — timeout in milliseconds (default: 60_000)
+
+  Returns `{:ok, result}` or `{:error, reason}`.
+  """
+  @spec evaluate(GenServer.server(), integer(), PklElixir.ModuleSource.t(), keyword()) ::
+          {:ok, term()} | {:error, Exception.t()}
   def evaluate(server, evaluator_id, %PklElixir.ModuleSource{} = source, opts \\ []) do
     GenServer.call(server, {:evaluate, evaluator_id, source, opts}, timeout(opts))
   end
 
   @doc "Close an evaluator (fire-and-forget)."
+  @spec close_evaluator(GenServer.server(), integer()) :: :ok
   def close_evaluator(server, evaluator_id) do
     GenServer.cast(server, {:close_evaluator, evaluator_id})
+  end
+
+  @doc """
+  Return the version of the pkl binary, or `{:error, reason}` if pkl is not found.
+  """
+  @spec pkl_version() :: {:ok, String.t()} | {:error, String.t()}
+  def pkl_version do
+    case find_pkl() do
+      {:ok, pkl} ->
+        case System.cmd(pkl, ["--version"], stderr_to_stdout: true) do
+          {output, 0} -> {:ok, String.trim(output)}
+          {output, _} -> {:error, "pkl --version failed: #{String.trim(output)}"}
+        end
+
+      {:error, _} = err ->
+        err
+    end
   end
 
   # ── GenServer callbacks ─────────────────────────────────────────────
 
   @impl true
   def init(_opts) do
+    Process.flag(:trap_exit, true)
     {:ok, %__MODULE__{}}
   end
 
@@ -119,18 +184,34 @@ defmodule PklElixir.Server do
     {:noreply, %{state | port: nil, buffer: <<>>, pending: %{}, evaluators: %{}}}
   end
 
+  def handle_info({:EXIT, _pid, reason}, state) do
+    Logger.debug("pkl_elixir: linked process exited: #{inspect(reason)}")
+    {:noreply, state}
+  end
+
   def handle_info(msg, state) do
     Logger.debug("pkl_elixir: unexpected message: #{inspect(msg)}")
     {:noreply, state}
   end
 
   @impl true
-  def terminate(_reason, %{port: port} = _state) when is_port(port) do
-    Port.close(port)
+  def terminate(_reason, state) do
+    if state.port && Port.info(state.port) do
+      # Close all evaluators gracefully before killing the port
+      for {eval_id, _} <- state.evaluators do
+        try do
+          msg = Message.encode_close_evaluator(eval_id)
+          Port.command(state.port, msg)
+        rescue
+          _ -> :ok
+        end
+      end
+
+      Port.close(state.port)
+    end
+
     :ok
   end
-
-  def terminate(_reason, _state), do: :ok
 
   # ── Buffer processing ───────────────────────────────────────────────
 
@@ -204,28 +285,28 @@ defmodule PklElixir.Server do
     state
   end
 
-  # ReadResource (0x26) — server asks client to read a resource
+  # ReadResource (0x26)
   defp dispatch(0x26, body, state) do
     handle_reader_request(body, state, :resource_readers, fn reader, uri ->
       reader.read(uri)
     end, &Message.encode_read_resource_response/3)
   end
 
-  # ReadModule (0x28) — server asks client to read a module
+  # ReadModule (0x28)
   defp dispatch(0x28, body, state) do
     handle_reader_request(body, state, :module_readers, fn reader, uri ->
       reader.read(uri)
     end, &Message.encode_read_module_response/3)
   end
 
-  # ListResources (0x2A) — server asks client to list resources
+  # ListResources (0x2A)
   defp dispatch(0x2A, body, state) do
     handle_reader_request(body, state, :resource_readers, fn reader, uri ->
       reader.list_elements(uri)
     end, &Message.encode_list_resources_response/3)
   end
 
-  # ListModules (0x2C) — server asks client to list modules
+  # ListModules (0x2C)
   defp dispatch(0x2C, body, state) do
     handle_reader_request(body, state, :module_readers, fn reader, uri ->
       reader.list_elements(uri)
@@ -289,12 +370,11 @@ defmodule PklElixir.Server do
     end
   end
 
-  # Pending can be either a plain `from` or `{from, module_readers, resource_readers}`
   defp extract_from({from, _mr, _rr}), do: from
   defp extract_from(from), do: from
 
   defp ensure_port(%{port: nil} = state) do
-    pkl = find_pkl!()
+    {:ok, pkl} = find_pkl()
 
     port =
       Port.open({:spawn_executable, pkl}, [
@@ -308,14 +388,16 @@ defmodule PklElixir.Server do
 
   defp ensure_port(state), do: state
 
-  defp find_pkl! do
+  defp find_pkl do
     case System.get_env("PKL_EXEC") do
       nil ->
-        System.find_executable("pkl") ||
-          raise "pkl executable not found. Install pkl or set PKL_EXEC env var."
+        case System.find_executable("pkl") do
+          nil -> {:error, "pkl executable not found. Install pkl or set PKL_EXEC env var."}
+          path -> {:ok, path}
+        end
 
       path ->
-        path
+        {:ok, path}
     end
   end
 
