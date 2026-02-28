@@ -42,8 +42,8 @@ defmodule PklElixir.MixProject do
 
   defp docs do
     [
-      main: "readme",
-      extras: ["README.md"]
+      main: "usage",
+      extras: ["guides/usage.md", "README.md"]
     ]
   end
 end
