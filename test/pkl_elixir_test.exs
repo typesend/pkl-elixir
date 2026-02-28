@@ -211,5 +211,113 @@ defmodule PklElixirTest do
         GenServer.stop(server)
       end
     end
+
+    @tag :integration
+    test "custom module reader" do
+      defmodule TestModuleReader do
+        @behaviour PklElixir.ModuleReader
+
+        @impl true
+        def scheme, do: "test"
+        @impl true
+        def is_local, do: false
+        @impl true
+        def is_globbable, do: false
+        @impl true
+        def has_hierarchical_uris, do: false
+        @impl true
+        def read("test:" <> path) do
+          case path do
+            "greeting" -> {:ok, ~S'result = "hello from custom reader"'}
+            _ -> {:error, "not found: #{path}"}
+          end
+        end
+        @impl true
+        def list_elements(_uri), do: {:ok, []}
+      end
+
+      text = """
+      import "test:greeting"
+      msg = import("test:greeting").result
+      """
+
+      assert {:ok, result} =
+               PklElixir.evaluate_text(text, module_readers: [TestModuleReader])
+
+      assert result["msg"] == "hello from custom reader"
+    end
+
+    @tag :integration
+    test "custom resource reader" do
+      defmodule TestResourceReader do
+        @behaviour PklElixir.ResourceReader
+
+        @impl true
+        def scheme, do: "testres"
+        @impl true
+        def is_globbable, do: false
+        @impl true
+        def has_hierarchical_uris, do: false
+        @impl true
+        def read("testres:" <> path) do
+          case path do
+            "data" -> {:ok, "custom resource data"}
+            _ -> {:error, "not found: #{path}"}
+          end
+        end
+        @impl true
+        def list_elements(_uri), do: {:ok, []}
+      end
+
+      text = """
+      data = read("testres:data").text
+      """
+
+      assert {:ok, result} =
+               PklElixir.evaluate_text(text, resource_readers: [TestResourceReader])
+
+      assert result["data"] == "custom resource data"
+    end
+
+    @tag :integration
+    test "custom module reader with create_evaluator options" do
+      defmodule TestModuleReader2 do
+        @behaviour PklElixir.ModuleReader
+
+        @impl true
+        def scheme, do: "inline"
+        @impl true
+        def is_local, do: false
+        @impl true
+        def is_globbable, do: false
+        @impl true
+        def has_hierarchical_uris, do: false
+        @impl true
+        def read("inline:" <> path) do
+          case path do
+            "config" -> {:ok, ~S'port = 9090'}
+            _ -> {:error, "unknown: #{path}"}
+          end
+        end
+        @impl true
+        def list_elements(_uri), do: {:ok, []}
+      end
+
+      alias PklElixir.{Server, ModuleSource}
+
+      {:ok, server} = Server.start_link()
+
+      try do
+        {:ok, eval_id} =
+          Server.create_evaluator(server, module_readers: [TestModuleReader2])
+
+        source = ModuleSource.text(~S'value = import("inline:config").port')
+        assert {:ok, %{"value" => 9090}} = Server.evaluate(server, eval_id, source)
+
+        Server.close_evaluator(server, eval_id)
+      after
+        GenServer.stop(server)
+      end
+    end
   end
 end
