@@ -27,6 +27,7 @@ defmodule PklElixir.MixProject do
   defp deps do
     [
       {:jason, "~> 1.4"},
+      {:msgpax, "~> 2.4"},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false}
     ]
   end
