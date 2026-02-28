@@ -1,0 +1,12 @@
+[submodule "vendor/pkl-go"]
+	path = vendor/pkl-go
+	url = https://github.com/apple/pkl-go
+[submodule "vendor/pkl-swift"]
+	path = vendor/pkl-swift
+	url = https://github.com/apple/pkl-swift
+[submodule "vendor/pkl-pantry"]
+	path = vendor/pkl-pantry
+	url = https://github.com/apple/pkl-pantry
+[submodule "vendor/pkl"]
+	path = vendor/pkl
+	url = https://github.com/apple/pkl

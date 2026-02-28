@@ -1,0 +1,21 @@
+# Mix artifacts
+/_build/
+/deps/
+/doc/
+
+# Crash dumps
+erl_crash.dump
+
+# Mix lock (include for applications, exclude for libraries)
+# mix.lock
+
+# Editor
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
