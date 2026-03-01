@@ -28,7 +28,7 @@ pkl --version
 # mix.exs
 def deps do
   [
-    {:pkl_elixir, "~> 0.0.1"}
+    {:pkl_elixir, "~> 0.0.3"}
   ]
 end
 ```

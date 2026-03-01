@@ -34,7 +34,7 @@ Add `pkl_elixir` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:pkl_elixir, "~> 0.0.1"}
+    {:pkl_elixir, "~> 0.0.3"}
   ]
 end
 ```
