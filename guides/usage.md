@@ -561,6 +561,173 @@ result["dark_mode"]["rollout_pct"]   #=> 25.0
 result["beta_api"]["allowed_users"]  #=> ["user_123", "user_456"]
 ```
 
-## Coming Soon
+## Code Generation: Pkl Schemas → Elixir Structs
 
-Code generation from Pkl schemas to Elixir structs is planned. This will let you define your data model in Pkl and generate typed Elixir modules automatically — similar to how `pkl-gen-go` and `pkl-gen-swift` work in their respective ecosystems.
+`PklElixir.Schema` reads a Pkl module at compile time, introspects its classes via `pkl:reflect`, and generates Elixir structs — no separate build step needed.
+
+### Basic usage
+
+Say you have a Pkl schema:
+
+```pkl
+// schema/User.pkl
+/// A registered user.
+class User {
+  name: String
+  email: String
+  age: Int?
+  active: Boolean
+}
+```
+
+Generate an Elixir struct from it:
+
+```elixir
+defmodule MyApp.User do
+  use PklElixir.Schema, source: "schema/User.pkl"
+end
+```
+
+This generates at compile time:
+
+- `defstruct` with keys matching the Pkl class properties
+- `@enforce_keys` for non-nullable properties
+- `@type t()` typespec with Pkl→Elixir type mapping
+- `@moduledoc` from the Pkl doc comment
+- `from_map/1` to convert evaluation results to the struct
+
+```elixir
+# Evaluate a Pkl file that produces User data
+{:ok, result} = PklElixir.evaluate("data.pkl")
+
+# Convert the string-keyed map to a struct
+user = MyApp.User.from_map(result)
+user.name    #=> "Alice"
+user.email   #=> "alice@example.com"
+user.age     #=> 30
+```
+
+The source path is resolved relative to the file containing the `use` statement — so `source: "schema/User.pkl"` works from `lib/my_app/user.ex` as long as `schema/` is alongside `lib/`.
+
+### Multi-class modules
+
+When a Pkl module defines multiple concrete classes, submodules are generated for each:
+
+```pkl
+// schema/Shape.pkl
+abstract class Shape {}
+class Circle extends Shape { radius: Float }
+class Rectangle extends Shape { width: Float; height: Float }
+class Point extends Shape { x: Float; y: Float; label: String? }
+```
+
+```elixir
+defmodule MyApp.Shape do
+  use PklElixir.Schema, source: "schema/Shape.pkl"
+end
+
+# Generates:
+# MyApp.Shape.Circle    — %MyApp.Shape.Circle{radius: ...}
+# MyApp.Shape.Rectangle — %MyApp.Shape.Rectangle{width: ..., height: ...}
+# MyApp.Shape.Point     — %MyApp.Shape.Point{x: ..., y: ..., label: ...}
+# Abstract classes (Shape) are skipped — no struct generated.
+
+circle = MyApp.Shape.Circle.from_map(%{"radius" => 5.0})
+#=> %MyApp.Shape.Circle{radius: 5.0}
+```
+
+### Selecting a single class
+
+Use `:class` to pick one class from a multi-class module. The struct is generated directly on the calling module:
+
+```elixir
+defmodule MyApp.Order do
+  use PklElixir.Schema, source: "schema/Order.pkl", class: "Order"
+end
+
+order = MyApp.Order.from_map(%{"id" => "order-1", "customer" => "Alice", "items" => []})
+#=> %MyApp.Order{id: "order-1", customer: "Alice", items: [], discount_code: nil}
+```
+
+### Nested struct conversion
+
+`from_map/1` recursively converts nested data. If a property's type is `Listing<SomeClass>` and `SomeClass` is defined in the same Pkl module, list items are automatically converted to the corresponding struct:
+
+```pkl
+// schema/Order.pkl
+class LineItem {
+  product: String
+  quantity: Int
+  price: Float
+}
+
+class Order {
+  id: String
+  customer: String
+  items: Listing<LineItem>
+  discount_code: String?
+}
+```
+
+```elixir
+defmodule MyApp.Orders do
+  use PklElixir.Schema, source: "schema/Order.pkl"
+end
+
+order = MyApp.Orders.Order.from_map(%{
+  "id" => "order-1",
+  "customer" => "Alice",
+  "items" => [
+    %{"product" => "Widget", "quantity" => 2, "price" => 9.99},
+    %{"product" => "Gadget", "quantity" => 1, "price" => 24.99}
+  ],
+  "discount_code" => nil
+})
+
+# order.items is a list of %MyApp.Orders.LineItem{} structs
+hd(order.items).product  #=> "Widget"
+```
+
+### Required field validation
+
+Non-nullable Pkl properties become `@enforce_keys`. The `from_map/1` function validates that required string keys are present in the input map:
+
+```elixir
+# User has required fields: name, email, active
+# Optional (nullable) field: age
+
+MyApp.User.from_map(%{"name" => "Alice"})
+#=> ** (ArgumentError) missing required keys ["active", "email"] for MyApp.User
+```
+
+### Type mapping
+
+| Pkl Type | Generated Elixir Typespec |
+|----------|--------------------------|
+| `String` | `String.t()` |
+| `Int` | `integer()` |
+| `Float` | `float()` |
+| `Boolean` | `boolean()` |
+| `Listing<T>` | `[T]` |
+| `Mapping<K,V>` / `Map<K,V>` | `%{K => V}` |
+| `Set<T>` | `MapSet.t()` |
+| `T?` (nullable) | `T \| nil` |
+| Type aliases | `String.t()` |
+| Other class references | `map()` |
+
+### Reflection API
+
+The underlying reflection is available directly if you need raw class metadata:
+
+```elixir
+{:ok, classes} = PklElixir.Reflector.reflect("schema/User.pkl")
+
+classes["User"]["properties"]["name"]["type"]
+#=> %{"kind" => "declared", "name" => "String"}
+
+classes["User"]["docComment"]
+#=> "A registered user."
+
+classes["User"]["isAbstract"]
+#=> false
+```

@@ -1,0 +1,19 @@
+/// A purchase order with line items.
+module Order
+
+/// A single line item in an order.
+class LineItem {
+  product: String
+  quantity: Int
+  price: Float
+}
+
+/// A purchase order.
+class Order {
+  id: String
+  /// Customer who placed the order.
+  customer: String
+  items: Listing<LineItem>
+  /// Optional discount code.
+  discount_code: String?
+}

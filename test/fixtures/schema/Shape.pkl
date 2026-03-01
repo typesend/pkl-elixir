@@ -1,0 +1,24 @@
+/// Geometric shapes.
+module Shape
+
+/// Base shape type.
+abstract class Shape {}
+
+/// A circle defined by its radius.
+class Circle extends Shape {
+  radius: Float
+}
+
+/// A rectangle defined by width and height.
+class Rectangle extends Shape {
+  width: Float
+  height: Float
+}
+
+/// A labeled point in 2D space.
+class Point extends Shape {
+  x: Float
+  y: Float
+  /// Optional label for the point.
+  label: String?
+}

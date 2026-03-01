@@ -4,6 +4,7 @@ Pkl language integration for Elixir — evaluate [Pkl](https://pkl-lang.org) con
 
 - Evaluate `.pkl` files or inline Pkl text
 - Full Pkl type system mapped to Elixir types (maps, lists, MapSet, Range, etc.)
+- **Compile-time codegen** — `use PklElixir.Schema` generates Elixir structs from Pkl classes
 - Custom module and resource readers for loading Pkl from any source
 - Managed server lifecycle — reuse a single `pkl server` across evaluations
 - Supervision tree support
@@ -17,6 +18,11 @@ config["port"]  #=> 4000
 
 {:ok, result} = PklElixir.evaluate_text(~S'name = "hello"')
 result["name"]  #=> "hello"
+
+# Generate Elixir structs from Pkl classes at compile time
+defmodule MyApp.User do
+  use PklElixir.Schema, source: "schema/User.pkl"
+end
 ```
 
 ## Installation

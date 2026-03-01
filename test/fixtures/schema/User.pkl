@@ -1,0 +1,11 @@
+/// A user account.
+module User
+
+/// A registered user.
+class User {
+  name: String
+  email: String
+  /// Age in years.
+  age: Int?
+  active: Boolean
+}
