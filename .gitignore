@@ -19,3 +19,6 @@ erl_crash.dump
 # OS
 .DS_Store
 Thumbs.db
+
+# Local notes
+/ideas/
